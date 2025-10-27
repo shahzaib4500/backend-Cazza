@@ -1,8 +1,10 @@
-export function isString(v) {
-  return typeof v === "string" && v.trim().length > 0;
-}
-
-export function validateEmail(email) {
-  // simple, permissive email regex
-  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
-}
+// ===============================
+// Helper for validation errors
+// ===============================
+export const handleValidationError = (res, error) => {
+  res.status(400).json({
+    success: false,
+    message: "Validation error",
+    details: error.details.map((d) => d.message),
+  });
+};

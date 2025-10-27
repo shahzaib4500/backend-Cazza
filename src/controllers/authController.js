@@ -1,93 +1,130 @@
-const userModel = require("../models/userModel");
-const jwtUtils = require("../utils/jwt");
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import crypto from "crypto";
+import { prisma } from "../config/db.js";
 
-/**
- * Register a new user
- * Body: { email, password, name }
- */
-async function register(req, res, next) {
+const JWT_SECRET = process.env.JWT_SECRET || "supersecretkey";
+
+// Register user + send verification code
+export const register = async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { firstName, lastName, email, password } = req.body;
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing)
+      return res.status(400).json({ message: "Email already exists" });
 
-    // Check if user already exists
-    const existing = await userModel.getUserByEmail(email);
-    if (existing) {
-      return res.status(409).json({ message: "User already exists" });
-    }
-
-    // Hash password and create user
-    const password_hash = await jwtUtils.hashPassword(password);
-    const user = await userModel.createUser({ email, password_hash, name });
-
-    // Generate access token
-    const token = jwtUtils.generateAccessToken({
-      id: user.id,
-      email: user.email,
+    const hashed = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({
+      data: { firstName, lastName, email, password: hashed },
     });
 
-    res.status(201).json({ user: sanitizeUser(user), token });
-  } catch (err) {
-    next(err);
-  }
-}
+    const code = crypto.randomBytes(3).toString("hex");
+    await prisma.signupVerification.create({
+      data: {
+        userId: user.id,
+        code,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      },
+    });
 
-/**
- * Login
- * Body: { email, password }
- */
-async function login(req, res, next) {
+    // You can send the code via email here
+    console.log("Verification code:", code);
+
+    res
+      .status(201)
+      .json({ message: "User created, verification code sent to email" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Verify signup code
+export const verifySignup = async (req, res) => {
+  try {
+    const { code } = req.body;
+    const record = await prisma.signupVerification.findUnique({
+      where: { code },
+    });
+    if (!record || record.expiresAt < new Date())
+      return res.status(400).json({ message: "Invalid or expired code" });
+
+    await prisma.signupVerification.update({
+      where: { id: record.id },
+      data: { verified: true },
+    });
+
+    res.json({ message: "Account verified successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Login
+export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Get user from DB
-    const user = await userModel.getUserByEmail(email);
-    if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(400).json({ message: "Invalid credentials" });
 
-    // Compare passwords
-    const valid = await jwtUtils.comparePassword(password, user.password_hash);
-    if (!valid) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
+    const token = jwt.sign(
+      { id: user.id, role: user.role, email: user.email },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
-    // Generate access token
-    const token = jwtUtils.generateAccessToken({
-      id: user.id,
-      email: user.email,
+    res.json({ token, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Forgot Password
+export const requestPasswordReset = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const code = crypto.randomBytes(3).toString("hex");
+    await prisma.passwordReset.create({
+      data: {
+        userId: user.id,
+        code,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      },
     });
 
-    res.json({ user: sanitizeUser(user), token });
+    console.log("Password reset code:", code);
+    res.json({ message: "Reset code sent to email" });
   } catch (err) {
-    next(err);
+    res.status(500).json({ error: err.message });
   }
-}
+};
 
-/**
- * Return currently authenticated user
- * (req.user set by authentication middleware)
- */
-async function me(req, res, next) {
+// Verify reset code & set new password
+export const resetPassword = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
+    const { code, newPassword } = req.body;
+    const reset = await prisma.passwordReset.findUnique({ where: { code } });
+    if (!reset || reset.used || reset.expiresAt < new Date())
+      return res.status(400).json({ message: "Invalid or expired code" });
 
-    res.json({ user: sanitizeUser(req.user) });
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({
+      where: { id: reset.userId },
+      data: { password: hashed },
+    });
+
+    await prisma.passwordReset.update({
+      where: { id: reset.id },
+      data: { used: true },
+    });
+
+    res.json({ message: "Password updated successfully" });
   } catch (err) {
-    next(err);
+    res.status(500).json({ error: err.message });
   }
-}
-
-/** Helper to remove sensitive fields */
-function sanitizeUser(user) {
-  if (!user) return null;
-  const { password_hash, ...rest } = user;
-  return rest;
-}
-
-module.exports = {
-  register,
-  login,
-  me,
 };
