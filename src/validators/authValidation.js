@@ -1,9 +1,11 @@
 import Joi from "joi";
 import { handleValidationError } from "../utils/helperfunction.js";
+
 // ===============================
 // Joi Schemas
 // ===============================
 
+// 🔹 Register
 const registerSchema = Joi.object({
   firstName: Joi.string().required().messages({
     "any.required": "First name is required",
@@ -23,6 +25,7 @@ const registerSchema = Joi.object({
   }),
 });
 
+// 🔹 Login
 const loginSchema = Joi.object({
   email: Joi.string().email().required().messages({
     "string.email": "Valid email required",
@@ -34,21 +37,40 @@ const loginSchema = Joi.object({
   }),
 });
 
-const resetPasswordSchema = Joi.object({
+// 🔹 Forgot Password (Request reset code)
+const forgotPasswordSchema = Joi.object({
   email: Joi.string().email().required().messages({
     "string.email": "Valid email required",
     "any.required": "Email is required",
   }),
 });
 
-const verifyCodeSchema = Joi.object({
-  code: Joi.string().required().messages({
-    "any.required": "Code is required",
-    "string.empty": "Code is required",
+// 🔹 Reset Password (Submit code + new password)
+const resetPasswordSchema = Joi.object({
+  email: Joi.string().email().required().messages({
+    "string.email": "Valid email required",
+    "any.required": "Email is required",
   }),
-  newPassword: Joi.string().min(6).required().messages({
-    "string.min": "Password must be at least 6 characters",
+  code: Joi.string().required().messages({
+    "any.required": "Reset code is required",
+    "string.empty": "Reset code is required",
+  }),
+  newPassword: Joi.string().min(8).required().messages({
+    "string.min": "New password must be at least 8 characters",
     "any.required": "New password is required",
+  }),
+});
+
+// 🔹 Verify Signup Code
+const verifySignupCodeSchema = Joi.object({
+  email: Joi.string().email().required().messages({
+    "string.email": "Valid email required",
+    "any.required": "Email is required",
+    "string.empty": "Email is required",
+  }),
+  code: Joi.string().required().messages({
+    "any.required": "Verification code is required",
+    "string.empty": "Verification code is required",
   }),
 });
 
@@ -56,6 +78,7 @@ const verifyCodeSchema = Joi.object({
 // Middleware Functions
 // ===============================
 
+// Register
 export const validateRegister = (req, res, next) => {
   const { error, value } = registerSchema.validate(req.body);
   if (error) return handleValidationError(res, error);
@@ -63,6 +86,7 @@ export const validateRegister = (req, res, next) => {
   next();
 };
 
+// Login
 export const validateLogin = (req, res, next) => {
   const { error, value } = loginSchema.validate(req.body);
   if (error) return handleValidationError(res, error);
@@ -70,6 +94,15 @@ export const validateLogin = (req, res, next) => {
   next();
 };
 
+// Forgot Password
+export const validateForgotPassword = (req, res, next) => {
+  const { error, value } = forgotPasswordSchema.validate(req.body);
+  if (error) return handleValidationError(res, error);
+  req.body = value;
+  next();
+};
+
+// Reset Password
 export const validateResetPassword = (req, res, next) => {
   const { error, value } = resetPasswordSchema.validate(req.body);
   if (error) return handleValidationError(res, error);
@@ -77,8 +110,9 @@ export const validateResetPassword = (req, res, next) => {
   next();
 };
 
-export const validateVerifyCode = (req, res, next) => {
-  const { error, value } = verifyCodeSchema.validate(req.body);
+// Verify Signup Code
+export const validateVerificationCode = (req, res, next) => {
+  const { error, value } = verifySignupCodeSchema.validate(req.body);
   if (error) return handleValidationError(res, error);
   req.body = value;
   next();

@@ -29,7 +29,7 @@ app.get("/", (req, res) => {
   });
 });
 // Mount API routes (index aggregates subroutes, e.g. /auth)
-app.use("/api", routes);
+app.use("/api/v1", routes);
 
 // Global error handler middleware
 app.use((err, req, res, next) => {
