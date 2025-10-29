@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --------------------
+// ENUMS
+// --------------------
+enum Role {
+  CLIENT
+  MEMBER
+  ADMIN
+  SUPERADMIN
+}
+
+enum Provider {
+  GMAIL
+  GOOGLE
+  APPLE
+}
+
+// --------------------
+// MODELS
+// --------------------
+model User {
+  id           String   @id @default(cuid())
+  firstName    String
+  lastName     String
+  email        String   @unique
+  password     String
+  role         Role     @default(CLIENT)
+  profileImage String? // Optional profile picture
+  provider     Provider @default(GMAIL)
+  verified     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  signupVerifications SignupVerification[]
+  passwordResets      PasswordReset[]
+}
+
+// --------------------
+// Signup Verification
+// --------------------
+model SignupVerification {
+  id        String   @id @default(cuid())
+  userId    String
+  code      String   @unique
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relation
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// --------------------
+// Password Reset
+// --------------------
+model PasswordReset {
+  id        String   @id @default(cuid())
+  userId    String
+  code      String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relation
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

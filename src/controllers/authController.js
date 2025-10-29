@@ -1,93 +1,195 @@
-const userModel = require("../models/userModel");
-const jwtUtils = require("../utils/jwt");
+import { prisma } from "../config/db.js";
+import {
+  hashPassword,
+  generateCode,
+  generateRefreshToken,
+  comparePassword,
+  generateAccessToken,
+} from "../utils/jwt.js";
+import { sendEmail } from "../utils/email.js";
+import { verificationTemplate } from "../utils/helperfunction.js";
 
-/**
- * Register a new user
- * Body: { email, password, name }
- */
-async function register(req, res, next) {
+// Register user + send verification code
+export const register = async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { firstName, lastName, email, password } = req.body;
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing)
+      return res.status(400).json({ message: "Email already exists" });
+    const hashed = await hashPassword(password);
 
-    // Check if user already exists
-    const existing = await userModel.getUserByEmail(email);
-    if (existing) {
-      return res.status(409).json({ message: "User already exists" });
-    }
-
-    // Hash password and create user
-    const password_hash = await jwtUtils.hashPassword(password);
-    const user = await userModel.createUser({ email, password_hash, name });
-
-    // Generate access token
-    const token = jwtUtils.generateAccessToken({
-      id: user.id,
-      email: user.email,
+    const user = await prisma.user.create({
+      data: { firstName, lastName, email, password: hashed },
     });
 
-    res.status(201).json({ user: sanitizeUser(user), token });
-  } catch (err) {
-    next(err);
-  }
-}
+    const code = generateCode();
+    await prisma.signupVerification.create({
+      data: {
+        userId: user.id,
+        code,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      },
+    });
 
-/**
- * Login
- * Body: { email, password }
- */
-async function login(req, res, next) {
+    // You can send the code via email here
+    console.log("Verification code:", code);
+    await sendEmail(
+      email,
+      "Verification Code",
+      verificationTemplate(firstName, code)
+    );
+
+    res
+      .status(201)
+      .json({ message: "Sign Up Completed, verification code sent to email" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Verify signup code
+export const verifySignup = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const record = await prisma.signupVerification.findFirst({
+      where: {
+        userId: user.id,
+        code,
+        expiresAt: { gt: new Date() },
+        verified: false,
+      },
+    });
+    if (!record || record.expiresAt < new Date())
+      return res.status(400).json({ message: "Invalid or expired code" });
+
+    await prisma.$transaction([
+      prisma.signupVerification.update({
+        where: { id: record.id },
+        data: { verified: true },
+      }),
+      prisma.user.update({
+        where: { id: record.userId },
+        data: { verified: true },
+      }),
+    ]);
+
+    res.json({ message: "Account verified successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Login
+export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Get user from DB
-    const user = await userModel.getUserByEmail(email);
-    if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" });
+    if (!user.verified) {
+      return res
+        .status(403)
+        .json({ message: "Account not verified. Please verify your email." });
     }
 
-    // Compare passwords
-    const valid = await jwtUtils.comparePassword(password, user.password_hash);
-    if (!valid) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
+    const match = await comparePassword(password, user.password);
+    if (!match) return res.status(400).json({ message: "Invalid credentials" });
 
-    // Generate access token
-    const token = jwtUtils.generateAccessToken({
+    const accessToken = generateAccessToken({ id: user.id, email: user.email });
+    const refreshToken = generateRefreshToken({
       id: user.id,
       email: user.email,
     });
 
-    res.json({ user: sanitizeUser(user), token });
+    // Only send safe fields
+    const safeUser = {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role,
+      profileImage: user.profileImage,
+    };
+
+    res.json({
+      accessToken,
+      refreshToken,
+      user: safeUser,
+    });
   } catch (err) {
-    next(err);
+    res.status(500).json({ error: err.message });
   }
-}
-
-/**
- * Return currently authenticated user
- * (req.user set by authentication middleware)
- */
-async function me(req, res, next) {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
-
-    res.json({ user: sanitizeUser(req.user) });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/** Helper to remove sensitive fields */
-function sanitizeUser(user) {
-  if (!user) return null;
-  const { password_hash, ...rest } = user;
-  return rest;
-}
-
-module.exports = {
-  register,
-  login,
-  me,
 };
+
+// Forgot Password
+export const requestPasswordReset = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const code = generateCode();
+    await prisma.passwordReset.create({
+      data: {
+        userId: user.id,
+        code,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      },
+    });
+
+    console.log("Password reset code:", code);
+    await sendEmail(
+      email,
+      "Verification Code",
+      verificationTemplate(user.firstName, code)
+    );
+    res.json({ message: "Reset code sent to email" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const resetPassword = async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+
+    // Step 1: Find user by email
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Step 2: Find password reset record for that user and code
+    const reset = await prisma.passwordReset.findFirst({
+      where: {
+        userId: user.id,
+        code,
+        used: false,
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (!reset)
+      return res.status(400).json({ message: "Invalid or expired code" });
+
+    // Step 3: Hash new password (await important!)
+    const hashed = await hashPassword(newPassword);
+
+    // Step 4: Update user password & mark reset as used
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: { password: hashed },
+      }),
+      prisma.passwordReset.update({
+        where: { id: reset.id },
+        data: { used: true },
+      }),
+    ]);
+
+    res.json({ message: "Password updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+

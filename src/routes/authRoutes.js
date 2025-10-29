@@ -1,15 +1,24 @@
-const express = require("express");
+import express from "express";
 const router = express.Router();
-const authController = require("../controllers/authController");
-const authMiddleware = require("../middleware/authMiddleware");
-const signUpValidator = require("../validators/signUpValidator");
-const signInValidator = require("../validators/signInValidator");
 
-// Public
-router.post("/register", signUpValidator, authController.register);
-router.post("/login", signInValidator, authController.login);
-
-// Protected
-router.get("/me", authMiddleware, authController.me);
-
-module.exports = router;
+import {
+  validateRegister,
+  validateLogin,
+  validateResetPassword,
+  validateForgotPassword,
+  validateVerificationCode,
+} from "../validators/authValidation.js";
+import {
+  register,
+  login,
+  resetPassword,
+  requestPasswordReset,
+  verifySignup,
+} from "../controllers/authController.js";
+// Routes
+router.post("/signup", validateRegister, register);
+router.post("/verify-code", validateVerificationCode, verifySignup);
+router.post("/signin", validateLogin, login);
+router.post("/forgot-password", validateForgotPassword, requestPasswordReset);
+router.post("/reset-password", validateResetPassword, resetPassword);
+export const authRoutes = router;
