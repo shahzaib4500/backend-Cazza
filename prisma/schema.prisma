@@ -23,25 +23,33 @@ enum Provider {
   APPLE
 }
 
+enum OnboardStatus {
+  REQUIRED
+  NOTREQUIRED
+  VERIFIED
+}
+
 // --------------------
 // MODELS
 // --------------------
 model User {
-  id           String   @id @default(cuid())
+  id           String        @id @default(cuid())
   firstName    String
   lastName     String
-  email        String   @unique
+  email        String        @unique
   password     String
-  role         Role     @default(CLIENT)
+  role         Role          @default(CLIENT)
   profileImage String? // Optional profile picture
-  provider     Provider @default(GMAIL)
-  verified     Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  provider     Provider      @default(GMAIL)
+  verified     Boolean       @default(false)
+  onboarded    OnboardStatus @default(REQUIRED)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   // Relations
   signupVerifications SignupVerification[]
   passwordResets      PasswordReset[]
+  businessInformation BusinessInformation?
 }
 
 // --------------------
@@ -69,6 +77,26 @@ model PasswordReset {
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  // Relation
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// --------------------
+// Business Information
+// --------------------
+
+model BusinessInformation {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  businessName       String
+  businessEntityType String
+  annualRevenueBand  String
+  marketplaces       String[] // Array of marketplace names
+  useXero            Boolean
+  multipleCurrencies Boolean
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   // Relation
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
